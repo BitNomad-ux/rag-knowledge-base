@@ -11,3 +11,64 @@ generator client {
 datasource db {
   provider = "postgresql"
 }
+
+/**
+ * @id： 主键，唯一标识符
+ * @default(uuid())：自动生成 UUID
+ * @map("user_id")：映射到数据库中的列名
+ * Timestamptz(3)：带时区的时间，精度到毫秒
+ * @updatedAt：会让 Prisma 在更新这条记录时，自动更新 updatedAt
+ */
+model User {
+  id           String   @id @default(uuid()) @db.Uuid
+  email        String   @unique @db.VarChar(254)
+  passwordHash String   @map("password_hash")
+  displayName  String   @map("display_name") @db.VarChar(50)
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt    DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  sessions       UserSession[] // 一个用户可以有多个会话
+  knowledgeBases KnowledgeBase[] // 一个用户可以拥有多个知识库
+
+  @@map("users")
+}
+
+model UserSession {
+  id               String    @id @default(uuid()) @db.Uuid
+  userId           String    @map("user_id") @db.Uuid
+  refreshTokenHash String    @map("refresh_token_hash") @db.VarChar(128)
+  expiresAt        DateTime  @map("expires_at") @db.Timestamptz(3)
+  revokedAt        DateTime? @map("revoked_at") @db.Timestamptz(3)
+  createdAt        DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt        DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  // 关联到 User 模型，user_sessions.user_id 外键关联到 users.id
+  // 如果某个用户还有登录会话，则不允许直接删除该用户
+  user User @relation(fields: [userId], references: [id], onDelete: Restrict)
+
+  // 分别为以下查询优化:
+  @@index([userId]) // 根据 userId 查找某个用户的所有会话
+  @@index([expiresAt]) // 根据 expiresAt 查找已经过期的会话
+  @@map("user_sessions")
+}
+
+model KnowledgeBase {
+  id          String   @id @default(uuid()) @db.Uuid
+  ownerId     String   @map("owner_id") @db.Uuid
+  name        String   @db.VarChar(100)
+  description String?  @db.VarChar(500)
+  status      String   @default("active") @db.VarChar(20)
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  // 关联到 User 模型，knowledge_bases.owner_id 外键关联到 users.id
+  // 如果某个用户还有知识库，则不允许直接删除该用户
+  owner User @relation(fields: [ownerId], references: [id], onDelete: Restrict)
+
+  /// 为以下查询优化:
+  // 根据 ownerId 和 name 生成不重名知识库
+  // 根据 ownerId 和 createdAt 查找知识库
+  @@unique([ownerId, name])
+  @@index([ownerId, createdAt])
+  @@map("knowledge_bases")
+}
