@@ -1,0 +1,20 @@
+services:
+  postgres: # 定义一个名为 postgres 的服务
+    image: pgvector/pgvector:0.8.7-pg17-trixie # Debian Trixie + PostgreSQL + pgvector
+    environment: # 第一次启动数据库时，会使用这些环境变量来创建数据库和用户
+      POSTGRES_USER: rag
+      POSTGRES_PASSWORD: rag_local_dev
+      POSTGRES_DB: rag_knowledge_base
+    ports: # 让电脑上的程序可以通过 5432 端口访问数据库
+      - "127.0.0.1:5432:5432"
+    volumes: # 把数据库数据保存起来，不要因为容器被删除而丢失
+      - postgres_data:/var/lib/postgresql/data
+      - ./docker/postgres/init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U rag -d rag_knowledge_base"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  postgres_data: # 创建一个叫 postgres_data 的持久化存储空间
