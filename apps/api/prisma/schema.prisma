@@ -68,7 +68,7 @@ model KnowledgeBase {
   // 如果某个用户还有知识库，则不允许直接删除该用户
   owner User @relation(fields: [ownerId], references: [id], onDelete: Restrict)
 
-  /// 为以下查询优化:
+  // 分别为以下查询优化:
   // 根据 ownerId 和 name 生成不重名知识库
   // 根据 ownerId 和 createdAt 查找知识库
   @@unique([ownerId, name])
