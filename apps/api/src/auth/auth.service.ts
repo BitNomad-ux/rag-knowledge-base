@@ -105,4 +105,125 @@ export class AuthService {
       },
     };
   }
+
+  /**
+   * 解析并校验 refreshToken 格式
+   * 登录时令牌格式为：sessionId.randomSecret。
+   */
+  private parseRefreshToken(token: string | undefined) {
+    if (!token || token.length > 256) return null;
+
+    const parts = token.split('.');
+    if (parts.length !== 2) return null;
+
+    const [sessionId, refreshSecret] = parts;
+    const uuidPattern =
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    const refreshSecretPattern = /^[A-Za-z0-9_-]{43}$/;
+
+    if (
+      !uuidPattern.test(sessionId) ||
+      !refreshSecretPattern.test(refreshSecret)
+    )
+      return null;
+
+    return {
+      sessionId,
+      tokenHash: createHash('sha256').update(token).digest('hex'),
+    };
+  }
+
+  async refresh(refreshToken: string | undefined) {
+    const parsed = this.parseRefreshToken(refreshToken);
+    if (!parsed) throw new UnauthorizedException('刷新令牌无效或已过期');
+
+    const now = new Date();
+    const session = await this.prisma.userSession.findUnique({
+      where: { id: parsed.sessionId },
+      // 把 user 这个关联关系包含进结果
+      include: {
+        user: {
+          select: {
+            id: true,
+            email: true,
+            displayName: true,
+          },
+        },
+      },
+    });
+
+    if (
+      !session ||
+      session.revokedAt ||
+      session.expiresAt <= now ||
+      session.refreshTokenHash !== parsed.tokenHash
+    )
+      throw new UnauthorizedException('刷新令牌无效或已过期');
+
+    const jwtSecret = process.env.JWT_SECRET;
+    if (!jwtSecret) throw new Error('JWT_SECRET 未设置');
+
+    const newRefreshSecret = randomBytes(32).toString('base64url');
+    const newRefreshToken = `${session.id}.${newRefreshSecret}`; // 有效期跟旧的 newRefreshToken 的有效期一样，不是新的有效期
+    const newRefreshTokenHash = createHash('sha256')
+      .update(newRefreshToken)
+      .digest('hex');
+
+    // 生成新的 accessToken，有效期是新的 15min
+    const accessToken = await this.jwt.signAsync(
+      { sub: session.userId, sessionId: session.id },
+      { secret: jwtSecret, expiresIn: '15m' },
+    );
+
+    // 条件更新让同一个旧令牌只能成功使用一次。
+    // 同时再次检查撤销和过期状态，避免查询与更新之间发生竞争。
+    // updateMany：批量更新
+    const updated = await this.prisma.userSession.updateMany({
+      where: {
+        id: session.id,
+        refreshTokenHash: parsed.tokenHash,
+        revokedAt: null,
+        expiresAt: { gt: new Date() }, // gt：大于，lt：小于，gte：大于等于，lte：小于等于
+      },
+      // 要写入/修改的数据
+      data: {
+        refreshTokenHash: newRefreshTokenHash,
+      },
+    });
+
+    if (updated.count !== 1) {
+      throw new UnauthorizedException('刷新令牌无效或已过期');
+    }
+
+    return {
+      accessToken,
+      refreshToken: newRefreshToken,
+      expiresAt: session.expiresAt,
+      user: {
+        id: session.user.id,
+        email: session.user.email,
+        displayName: session.user.displayName,
+      },
+    };
+  }
+
+  async logout(refreshToken: string | undefined) {
+    const parsed = this.parseRefreshToken(refreshToken);
+
+    // 没有令牌或令牌格式错误时，也按已退出处理。
+    if (!parsed) {
+      return;
+    }
+
+    await this.prisma.userSession.updateMany({
+      where: {
+        id: parsed.sessionId,
+        refreshTokenHash: parsed.tokenHash,
+        revokedAt: null,
+      },
+      data: {
+        revokedAt: new Date(),
+      },
+    });
+  }
 }

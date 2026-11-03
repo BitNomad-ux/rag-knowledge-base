@@ -16,6 +16,24 @@ import { LoginDto } from './dto/login.dto.js';
 export class AuthController {
   constructor(private readonly authService: AuthService) {}
 
+  private assertAllowedOrigin(request: Request) {
+    // 本地开发允许 Vite 前端和直接访问后端的同源请求。
+    // 部署时应替换为实际前端域名，并继续做 CSRF 防护。
+    const allowedOrigins = new Set([
+      'http://localhost:5173',
+      'http://localhost:3000',
+    ]);
+
+    const origin = request.headers.origin;
+
+    if (
+      (origin && !allowedOrigins.has(origin)) ||
+      request.headers['sec-fetch-site'] === 'cross-site'
+    ) {
+      throw new ForbiddenException('请求来源不被允许');
+    }
+  }
+
   /**
    * @Body()：读取 HTTP 请求中的请求体（request body），并把它作为参数传给方法
    * @param dto
@@ -33,21 +51,7 @@ export class AuthController {
     @Req() request: Request,
     @Res({ passthrough: true }) response: Response,
   ) {
-    // 本地开发允许 Vite 前端和直接访问后端的同源请求。
-    // 部署时应替换为实际前端域名，并继续做 CSRF 防护。
-    const allowedOrigins = new Set([
-      'http://localhost:5173',
-      'http://localhost:3000',
-    ]);
-
-    const origin = request.headers.origin;
-
-    if (
-      (origin && !allowedOrigins.has(origin)) ||
-      request.headers['sec-fetch-site'] === 'cross-site'
-    ) {
-      throw new ForbiddenException('请求来源不被允许');
-    }
+    this.assertAllowedOrigin(request);
 
     const result = await this.authService.login(dto);
 
@@ -64,5 +68,53 @@ export class AuthController {
       expiresIn: 900,
       user: result.user,
     };
+  }
+
+  @Post('refresh')
+  @HttpCode(200)
+  async refresh(
+    @Req() request: Request,
+    @Res({ passthrough: true }) response: Response, // 可以修改响应细节，NestJS 仍然负责最终发送响应
+  ) {
+    this.assertAllowedOrigin(request);
+
+    const refreshToken = request.cookies?.refresh_token as string | undefined;
+    const result = await this.authService.refresh(refreshToken);
+
+    // 设置新的 refresh token 到 Cookie 中
+    response.cookie('refresh_token', result.refreshToken, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax',
+      path: '/auth',
+      expires: result.expiresAt,
+    });
+
+    return {
+      accessToken: result.accessToken,
+      expiresIn: 900,
+      user: result.user,
+    };
+  }
+
+  @Post('logout')
+  @HttpCode(200)
+  async logout(
+    @Req() request: Request,
+    @Res({ passthrough: true }) response: Response,
+  ) {
+    this.assertAllowedOrigin(request);
+
+    const refreshToken = request.cookies?.refresh_token as string | undefined;
+    await this.authService.logout(refreshToken);
+
+    response.clearCookie('refresh_token', {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax',
+      path: '/auth',
+    });
+
+    return { message: '已退出登录' };
   }
 }
