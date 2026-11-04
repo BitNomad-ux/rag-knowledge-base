@@ -51,5 +51,6 @@ async function handleLogin() {
         {{ loading ? '登录中...' : '登录' }}
       </button>
     </form>
+    <p>还没有账号？<router-link to="/register">注册账号</router-link></p>
   </main>
 </template>

@@ -26,7 +26,7 @@ export class KnowledgeBaseController {
 
   /**
    * POST /knowledge-bases
-   *
+   * 创建知识库
    * 当前用户 ID 由 AccessTokenGuard 验证后写入 request.user。
    */
   @Post()
@@ -39,6 +39,7 @@ export class KnowledgeBaseController {
 
   /**
    * GET /knowledge-bases?page=1&pageSize=20
+   * 分页获取当前用户的知识库
    */
   @Get()
   findAll(
@@ -50,6 +51,7 @@ export class KnowledgeBaseController {
 
   /**
    * GET /knowledge-bases/:id
+   * 获取单个知识库详情
    */
   @Get(':id')
   findOne(
@@ -61,6 +63,7 @@ export class KnowledgeBaseController {
 
   /**
    * PATCH /knowledge-bases/:id
+   * 更新知识库信息
    */
   @Patch(':id')
   update(

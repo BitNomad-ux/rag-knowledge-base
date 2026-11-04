@@ -1,5 +1,5 @@
-// login、refresh、logout 接口
-import { assertOk, request } from './http'
+import { baseRequestClient } from './request'
+import { HttpError } from '@/utils/request/http-error'
 
 export interface User {
   id: string
@@ -13,33 +13,37 @@ export interface AuthResponse {
   user: User
 }
 
-export async function loginApi(email: string, password: string): Promise<AuthResponse> {
-  const response = await request('/auth/login', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email, password }),
-  })
+export interface RegisterInput {
+  email: string
+  password: string
+  displayName: string
+}
 
-  await assertOk(response)
-  return (await response.json()) as AuthResponse
+export function registerApi(input: RegisterInput): Promise<User> {
+  return baseRequestClient.post<User>('/auth/register', input)
+}
+
+export function loginApi(email: string, password: string): Promise<AuthResponse> {
+  return baseRequestClient.post<AuthResponse>('/auth/login', {
+    email,
+    password,
+  })
 }
 
 export async function refreshApi(): Promise<AuthResponse | null> {
-  const response = await request('/auth/refresh', {
-    method: 'POST',
-  })
+  try {
+    return await baseRequestClient.post<AuthResponse>('/auth/refresh')
+  } catch (error) {
+    // 没有有效会话是正常的未登录状态。
+    if (error instanceof HttpError && error.status === 401) {
+      return null
+    }
 
-  // 没有有效会话属于正常的未登录状态。
-  if (response.status === 401) return null
-
-  await assertOk(response)
-  return (await response.json()) as AuthResponse
+    throw error
+  }
 }
 
 export async function logoutApi(): Promise<void> {
-  const response = await request('/auth/logout', {
-    method: 'POST',
-  })
-
-  await assertOk(response)
+  // 当前后端返回消息对象；前端退出流程不需要读取它。
+  await baseRequestClient.post('/auth/logout')
 }
