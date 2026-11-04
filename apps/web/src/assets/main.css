@@ -1,35 +1,32 @@
-@import './base.css';
+:root {
+  font-family: Inter, 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  color: #202630;
+  background: #f6f7f5;
+  font-synthesis: none;
+
+  /* Element Plus 使用的主色，接近原型中的深绿色 */
+  --el-color-primary: #345b46;
+  --el-color-primary-light-3: #708c7a;
+  --el-color-primary-light-5: #a1b3a7;
+  --el-color-primary-light-7: #c6d2ca;
+  --el-color-primary-light-8: #dce5df;
+  --el-color-primary-light-9: #edf3ee;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  min-width: 320px;
+  margin: 0;
+}
+
+button,
+input {
+  font: inherit;
+}
 
 #app {
-  max-width: 1280px;
-  margin: 0 auto;
-  padding: 2rem;
-  font-weight: normal;
-}
-
-a,
-.green {
-  text-decoration: none;
-  color: hsla(160, 100%, 37%, 1);
-  transition: 0.4s;
-  padding: 3px;
-}
-
-@media (hover: hover) {
-  a:hover {
-    background-color: hsla(160, 100%, 37%, 0.2);
-  }
-}
-
-@media (min-width: 1024px) {
-  body {
-    display: flex;
-    place-items: center;
-  }
-
-  #app {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    padding: 0 2rem;
-  }
+  min-height: 100vh;
 }

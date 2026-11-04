@@ -1,6 +1,9 @@
 // 通用请求、Bearer token、401 后刷新与重试
 const API_BASE = 'http://localhost:3000'
 
+/**
+ * 由认证 store 注册的回调，用于获取 access token、刷新和清除认证信息。
+ */
 interface AuthHooks {
   getAccessToken: () => string | null
   refresh: () => Promise<boolean>
@@ -95,19 +98,33 @@ export async function authorizedRequest(
 
   const currentToken = hooks.getAccessToken()
 
-  // 其他请求可能已经完成刷新，直接使用新令牌重试。
+  /**
+   * 情况一：其他请求已经刷新成功
+   */
   if (currentToken && currentToken !== tokenUsed) {
     return send(currentToken)
   }
 
+  /**
+   * 情况二：没有其他请求完成刷新
+   */
   const refreshed = await hooks.refresh()
 
+  /**
+   * 情况三：刷新失败
+   */
   if (!refreshed) {
     return response
   }
 
+  /**
+   * 情况四：刷新成功后重试
+   */
   const retryResponse = await send(hooks.getAccessToken())
 
+  /**
+   * 情况五：重试后仍然 401
+   */
   if (retryResponse.status === 401) {
     hooks.clearAuth()
   }

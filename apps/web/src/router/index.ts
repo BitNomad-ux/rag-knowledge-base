@@ -27,7 +27,7 @@ router.beforeEach(async (to) => {
     await auth.initialize()
   } catch {
     // 恢复登录时发生网络或服务器错误。
-    // 先允许用户进入登录页，后续可加入专门的错误页面。
+    // TODO: 为恢复登录时的网络或服务器错误提供专门的错误页面。
     if (to.name !== 'login') return { name: 'login' }
     return true
   }
