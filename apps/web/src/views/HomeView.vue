@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { Document, Edit, Search, UploadFilled } from '@element-plus/icons-vue'
+import { Edit, Search, UploadFilled } from '@element-plus/icons-vue'
 import {
   createKnowledgeBase,
   getKnowledgeBase,
@@ -15,6 +15,8 @@ import AppHeader from '@/components/layout/AppHeader.vue'
 import AppSidebar from '@/components/layout/AppSideBar.vue'
 import UploadPanel from '@/components/layout/UploadPanel.vue'
 import KnowledgeBaseDialog from '@/components/KnowledgeBaseDialog.vue'
+import { downloadDocument, getDocuments, type DocumentItem } from '@/api/documents'
+import DocumentDetailDialog from '@/components/DocumentDetailDialog.vue'
 
 const router = useRouter()
 
@@ -29,6 +31,17 @@ const listLoading = ref(false)
 const listError = ref('')
 const detailLoading = ref(false)
 
+const documents = ref<DocumentItem[]>([])
+const documentsLoading = ref(false)
+const documentsError = ref('')
+
+const documentsPage = ref(1)
+const documentsPageSize = 20
+const documentsTotal = ref(0)
+
+// 用序号忽略已经过期的列表响应。
+let documentsRequestId = 0
+
 // 列表分页信息由后端返回的 page/total 驱动。
 const page = ref(1)
 const pageSize = 20
@@ -39,6 +52,15 @@ const dialogVisible = ref(false)
 const dialogMode = ref<'create' | 'edit'>('create')
 const dialogLoading = ref(false)
 const dialogError = ref('')
+
+// 文件详情弹窗
+const documentDetailVisible = ref(false)
+const currentDocumentId = ref<string | null>(null)
+
+function openDocumentDetail(document: DocumentItem) {
+  currentDocumentId.value = document.id
+  documentDetailVisible.value = true
+}
 
 // 请求序号用于忽略过期的详情响应，避免快速切换时旧响应覆盖新知识库。
 let detailRequestId = 0
@@ -52,6 +74,71 @@ async function handleError(error: unknown) {
 
   ElMessage.error(error instanceof Error ? error.message : '请求失败')
 }
+
+async function loadDocuments(nextPage = 1) {
+  const knowledgeBaseId = selected.value?.id
+  if (!knowledgeBaseId) return
+
+  const requestId = ++documentsRequestId
+  documentsLoading.value = true
+  documentsError.value = ''
+
+  try {
+    const result = await getDocuments(knowledgeBaseId, nextPage, documentsPageSize)
+
+    if (requestId !== documentsRequestId) return
+
+    documents.value = result.items
+    documentsTotal.value = result.total
+    documentsPage.value = result.page
+  } catch (error) {
+    if (requestId !== documentsRequestId) return
+
+    documentsError.value = error instanceof Error ? error.message : '文档加载失败'
+
+    await handleError(error)
+  } finally {
+    if (requestId === documentsRequestId) {
+      documentsLoading.value = false
+    }
+  }
+}
+
+function handleUploaded(knowledgeBaseId: string) {
+  ElMessage.success('文档上传成功')
+
+  // 用户可能在上传期间切换知识库，只刷新当前对应的列表。
+  if (selected.value?.id === knowledgeBaseId) {
+    void loadDocuments(1)
+  }
+}
+
+function formatSize(value: string) {
+  const bytes = Number(value)
+
+  if (!Number.isFinite(bytes)) return value
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`
+}
+
+// 当前知识库变化时，清空旧列表并加载新的列表。
+watch(
+  () => selected.value?.id,
+  (id) => {
+    documentsRequestId++
+    documents.value = []
+    documentsTotal.value = 0
+    documentsPage.value = 1
+    documentsError.value = ''
+    documentsLoading.value = false
+
+    if (id) {
+      void loadDocuments()
+    }
+  },
+)
 
 async function loadDetail(id: string) {
   const requestId = ++detailRequestId
@@ -159,6 +246,34 @@ async function submitDialog(input: { name: string; description: string | null })
   }
 }
 
+const downloadingId = ref<string | null>(null)
+
+async function handleDownload(document: DocumentItem) {
+  if (downloadingId.value) return
+
+  downloadingId.value = document.id
+
+  try {
+    const blob = await downloadDocument(document.id)
+    const url = URL.createObjectURL(blob)
+
+    const link = window.document.createElement('a')
+    link.href = url
+    link.download = document.originalName
+
+    window.document.body.appendChild(link)
+    link.click()
+    link.remove()
+
+    // 留出浏览器读取 Blob URL 的时间，再释放内存。
+    window.setTimeout(() => URL.revokeObjectURL(url), 60_000)
+  } catch (error) {
+    await handleError(error)
+  } finally {
+    downloadingId.value = null
+  }
+}
+
 // 首次进入页面时加载第一页知识库。
 onMounted(() => {
   void loadList()
@@ -242,19 +357,70 @@ onMounted(() => {
             />
           </div>
 
-          <!-- TODO: 接入文档列表接口并替换空数组 -->
-          <el-table :data="[]" empty-text="暂无文档">
-            <el-table-column label="名称" min-width="220" />
-            <el-table-column label="类型" width="80" />
-            <el-table-column label="大小" width="90" />
-            <el-table-column label="上传时间" min-width="140" />
-            <el-table-column label="状态" width="90" />
-          </el-table>
-
-          <div class="empty-hint">
-            <el-icon :size="26"><Document /></el-icon>
-            <p>文档功能接入后，可在这里查看和管理资料。</p>
+          <div v-if="documentsError" class="empty-hint">
+            <p>文档加载失败：{{ documentsError }}</p>
+            <el-button @click="loadDocuments(documentsPage)">重试</el-button>
           </div>
+
+          <template v-else>
+            <el-table v-loading="documentsLoading" :data="documents" empty-text="暂无文档">
+              <el-table-column prop="originalName" label="名称" min-width="220">
+                <template #default="{ row }">
+                  <el-button link type="primary" @click="openDocumentDetail(row)">
+                    {{ row.originalName }}
+                  </el-button>
+                </template>
+              </el-table-column>
+
+              <el-table-column label="类型" width="80">
+                <template #default="{ row }">
+                  {{ row.fileExtension.toUpperCase() }}
+                </template>
+              </el-table-column>
+
+              <el-table-column label="大小" width="100">
+                <template #default="{ row }">
+                  {{ formatSize(row.sizeBytes) }}
+                </template>
+              </el-table-column>
+
+              <el-table-column label="上传时间" min-width="160">
+                <template #default="{ row }">
+                  {{ new Date(row.createdAt).toLocaleString() }}
+                </template>
+              </el-table-column>
+
+              <el-table-column label="状态" width="100">
+                <template #default>
+                  <el-tag type="success">已上传</el-tag>
+                </template>
+              </el-table-column>
+
+              <el-table-column label="操作" width="100">
+                <template #default="{ row }">
+                  <el-button
+                    link
+                    type="primary"
+                    :loading="downloadingId === row.id"
+                    :disabled="downloadingId !== null && downloadingId !== row.id"
+                    @click="handleDownload(row)"
+                  >
+                    下载
+                  </el-button>
+                </template>
+              </el-table-column>
+            </el-table>
+
+            <el-pagination
+              v-if="documentsTotal > documentsPageSize"
+              class="documents-pagination"
+              layout="prev, pager, next"
+              :current-page="documentsPage"
+              :page-size="documentsPageSize"
+              :total="documentsTotal"
+              @current-change="loadDocuments"
+            />
+          </template>
         </template>
 
         <div v-else-if="listError" class="empty-hint">
@@ -267,7 +433,13 @@ onMounted(() => {
         </el-empty>
       </main>
 
-      <UploadPanel v-if="showUpload && selected" @close="showUpload = false" />
+      <UploadPanel
+        v-if="showUpload && selected"
+        :key="selected.id"
+        :knowledge-base-id="selected.id"
+        @close="showUpload = false"
+        @uploaded="handleUploaded"
+      />
     </div>
 
     <!-- 新建和编辑共用同一个弹窗，通过 dialogMode 区分操作类型。 -->
@@ -278,6 +450,12 @@ onMounted(() => {
       :loading="dialogLoading"
       :error="dialogError"
       @submit="submitDialog"
+    />
+    <!-- 文件详情弹窗 -->
+    <DocumentDetailDialog
+      v-model="documentDetailVisible"
+      :document-id="currentDocumentId"
+      @download="handleDownload"
     />
   </div>
 </template>
@@ -377,5 +555,9 @@ onMounted(() => {
   display: flex;
   align-items: center;
   gap: 8px;
+}
+.documents-pagination {
+  justify-content: flex-end;
+  margin-top: 20px;
 }
 </style>

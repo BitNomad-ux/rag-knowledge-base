@@ -1,6 +1,6 @@
 /**
-  * 定义数据库有哪些表和字段
-  */
+ * 定义数据库有哪些表和字段
+ */
 // This is your Prisma schema file,
 // learn more about it in the docs: https://pris.ly/d/prisma-schema
 
@@ -68,10 +68,32 @@ model KnowledgeBase {
   // 如果某个用户还有知识库，则不允许直接删除该用户
   owner User @relation(fields: [ownerId], references: [id], onDelete: Restrict)
 
+  documents Document[] // 一个知识库可以包含多个文档
+
   // 分别为以下查询优化:
   // 根据 ownerId 和 name 生成不重名知识库
   // 根据 ownerId 和 createdAt 查找知识库
   @@unique([ownerId, name])
   @@index([ownerId, createdAt])
   @@map("knowledge_bases")
+}
+
+model Document {
+  id              String   @id @default(uuid()) @db.Uuid
+  knowledgeBaseId String   @map("knowledge_base_id") @db.Uuid
+  originalName    String   @map("original_name") @db.VarChar(255)
+  storageKey      String   @unique @map("storage_key") @db.VarChar(255)
+  fileExtension   String   @map("file_extension") @db.VarChar(10)
+  mediaType       String?  @map("media_type") @db.VarChar(127)
+  sizeBytes       BigInt   @map("size_bytes")
+  status          String   @default("uploaded") @db.VarChar(20)
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt       DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  // 限制直接删除仍有文档的知识库，避免绕过文件清理
+  knowledgeBase KnowledgeBase @relation(fields: [knowledgeBaseId], references: [id], onDelete: Restrict)
+
+  // 优化按知识库和创建时间查询文档列表
+  @@index([knowledgeBaseId, createdAt])
+  @@map("documents")
 }
